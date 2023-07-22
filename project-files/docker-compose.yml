@@ -1,0 +1,16 @@
+# docker compose file for backend service
+# author: DOUGLAS BAEK
+
+version: '1.0.0'
+services:
+  users-webservice:
+    container_name: users-webservice
+    build:
+      context: .                    # directory where Dockerfile is located
+      args:
+        - PROJECT_NAME=users
+      dockerfile: Dockerfile          # name of Dockerfile to execute
+    image: users:latest             # image name
+    platform: linux/amd64
+    ports:
+      - 8080:8080               # which ports to open from docker to external

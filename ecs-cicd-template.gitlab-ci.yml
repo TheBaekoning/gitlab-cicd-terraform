@@ -1,0 +1,103 @@
+### ECS Build/Publish/CleanUp/Deploy CICD Pipeline
+### Author : Doug Baek
+### Ver. 23.07.15
+
+### BUILD ###
+
+.build:
+  before_script:
+    #   - sudo apt install python3-pip
+    - pip3 --version
+  #    - pip3 install --no-cache-dir awscli
+  script:
+    - docker build -t $TAG_LATEST --build-arg="PROJECT_NAME=$IMAGE_NAME" .
+
+    - aws ecr get-login-password --region $AWS_REGION |
+      docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+    #    - docker pull $TAG_LATEST || true
+    #    - docker build --cache-from $TAG_LATEST -t $TAG_COMMIT -t $TAG_LATEST .
+    #    - docker push $TAG_COMMIT
+   # - docker push $TAG_LATEST
+
+feature-build:
+  stage: build
+  only:
+    - /^feature.*$/ # change this before final launch to be pointing to development branch instead
+  script:
+    - docker build -t test-build-user-$CI_COMMIT_SHORT_SHA .
+    - docker image rm test-build-user-$CI_COMMIT_SHORT_SHA --force
+  after_script:
+    - docker image rm test-build-user-$CI_COMMIT_SHORT_SHA --force
+
+qa-build:
+  stage: build
+  only:
+    - /^development.*$/ # change this before final launch to be pointing to development branch instead
+  variables:
+    TAG_LATEST: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_NAME-qa:latest
+    TAG_COMMIT: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_NAME-qa:$CI_COMMIT_SHORT_SHA
+    AWS_REGION: us-east-2
+    DOCKER_TLS_CERTDIR: ""
+  extends: .build
+
+stg-build:
+  stage: build
+  when: manual
+  only:
+    - /^release.*$/
+  variables:
+    TAG_LATEST: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_NAME-stg:latest
+    TAG_COMMIT: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_NAME-stg:$CI_COMMIT_SHORT_SHA
+    AWS_REGION: us-east-2
+    DOCKER_TLS_CERTDIR: ""
+  extends: .build
+
+### PUBLISH ####
+
+.publish:
+  when: manual
+  script:
+    - docker push $TAG_LATEST
+    - aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_NAME --force-new-deployment --region $AWS_REGION
+  needs:
+    - job: "qa-build"
+      optional: true
+    - job: "stg-build"
+      optional: true
+
+qa-publish:
+  variables:
+    TAG_LATEST: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_NAME-qa:latest
+    CLUSTER_NAME: qa-backend-ecs-cluster
+    SERVICE_NAME: $IMAGE_NAME-qa
+    AWS_REGION: us-east-2
+  stage: publish
+  extends: .publish
+  only:
+    - /^development.*$/
+
+stg-publish:
+  variables:
+    TAG_LATEST: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_NAME-stg:latest
+    CLUSTER_NAME: stg-backend-ecs-cluster
+    SERVICE_NAME: $IMAGE_NAME-stg
+    AWS_REGION: us-east-2
+  stage: publish
+  extends: .publish
+  only:
+    - /^release.*$/
+
+### CLEANUP
+### This will clear any docker images that is older than 30 days
+### Will ensure runner servers will not run out of storage memory
+
+cleanup:
+  stage: cleanup
+  needs:
+    - job: "qa-publish"
+      optional: true
+    - job: "stg-publish"
+      optional: true
+  script:
+    # - docker rmi -f $(docker images -aq) // this deletes everything
+    - docker image prune --all --filter until=48h -f

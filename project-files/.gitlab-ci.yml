@@ -1,0 +1,9 @@
+stages:
+  - build
+  - publish
+  - cleanup
+variables:
+  IMAGE_NAME: $PROJECT_NAME
+include:
+  - project: *****-app/devops/backend-ecs-cicd
+    file: ecs-cicd-template.gitlab-ci.yml
