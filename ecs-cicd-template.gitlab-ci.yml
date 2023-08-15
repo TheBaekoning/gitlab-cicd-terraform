@@ -101,3 +101,4 @@ cleanup:
   script:
     # - docker rmi -f $(docker images -aq) // this deletes everything
     - docker image prune --all --filter until=48h -f
+    - docker builder prune --all --filter until=48h -f
